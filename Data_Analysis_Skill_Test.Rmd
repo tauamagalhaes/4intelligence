@@ -1,0 +1,672 @@
+---
+title: "Data Analysis Skill Test - 4intelligence"
+author: "Tauã Magalhães Vital"
+date: "11/27/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Case 1
+
+The first case is composed of analyzing the Current Total Factor Productivity (TFP) at constant national prices (2005 is the year of reference) for three countries United States, Canada and Mexico.
+
+Total factor productivity is a measure of economic efficiency and accounts for part of the differences in cross-country per-capita income. The rate of TFP growth is calculated by subtracting growth rates of labor and capital inputs from the growth rate of output.
+
+The goal of this task is to first describe the variable for the three mentioned countries through an exploratory analysis, and then forecast ten years of data. I decide to use a time series approach.
+
+### Opening the data
+
+Open the TFP.csv file given to complete the Case 1 of the Data Analysis Skill Test. Some descriptive statistics of the data.
+
+
+```{r, message = FALSE}
+#### Making the data tidy
+# Reading data directly from Github
+library(readr)
+# Loading data
+tfp_data <- readr::read_csv("https://raw.githubusercontent.com/tauamagalhaes/4intelligence/main/TFP.csv")
+# Loading libraries
+library(dplyr)
+# Filtering the TFP per country
+tfp_usa <- tfp_data %>% filter(isocode == "USA") %>% rename(tfp_usa = rtfpna)
+tfp_can <- tfp_data %>% filter(isocode == "CAN") %>% rename(tfp_can = rtfpna)
+tfp_mex <- tfp_data %>% filter(isocode == "MEX") %>% rename(tfp_mex = rtfpna)
+# Joining data in a single dataset by year
+tfp_data <- left_join(tfp_usa, tfp_can, by = "year")
+tfp_data <- left_join(tfp_data, tfp_mex, by = "year")
+# Excluding isocode variables
+tfp_data <- tfp_data %>% dplyr::select(-c(isocode.x, isocode.y, isocode))
+# Changing columns to numeric
+tfp_data$tfp_usa <- as.numeric(tfp_data$tfp_usa)
+tfp_data$tfp_can <- as.numeric(tfp_data$tfp_can)
+tfp_data$tfp_mex <- as.numeric(tfp_data$tfp_mex)
+# Changing to a ts object
+tfp_ts <- ts(tfp_data[, -1], start = c(1950,1), end = c(2011,1),frequency = 1)
+# Descriptive statistics of the data
+summary(tfp_data)
+```
+We can see that the data goes from 1950 to 2011. As the series were standardized based on 2005, the summary statistics are not very helpful.
+
+### Plots
+Doing some plots of the time series.
+```{r, message = FALSE}
+##### Plots
+library(fpp2)
+library(ggplot2)
+library(forecast)
+# General plot of the series
+autoplot(tfp_ts, facets = TRUE)
+```
+The TFP for the USA has clearly an upward trend from the 1950's. While Mexico saw an increase in its TFP until the 1980's and then it started to decline. Between the three countries, Canada is the one with the more steady TFP, with a few ups and downs.
+
+### Unit root tests
+The first thing to do is to see if the data is stationary, in other words testing if the series have a unit root. We will start this analysis by making an autocorrelation plot for each series.
+
+#### ACF USA
+```{r, message = FALSE}
+# Making three different ts objects for better visualization
+tfp_usa_ts <- ts(tfp_data[, 2], start = c(1950), frequency = 1)
+tfp_can_ts <- ts(tfp_data[, 3], start = c(1950), frequency = 1)
+tfp_mex_ts <- ts(tfp_data[, 4], start = c(1950), frequency = 1)
+# ACF USA
+ggAcf(tfp_usa_ts)
+```
+
+#### ACF Mexico
+```{r, message = FALSE}
+# General plot of the series
+ggAcf(tfp_mex_ts)
+```
+
+#### ACF Canada
+```{r, message = FALSE}
+# General plot of the series
+ggAcf(tfp_can_ts)
+```
+
+The Autocorrelation plot for the three countries clearly has a slow decay, which is evidence for the presence of a unit root. Therefore there is evidence that the TFP of USA, Canada and Mexico are not stationary. Further tests, such as the Augmented Dickey-Fuller we will be done to complete evaluate this hypothesis.
+
+### Unit root tests
+
+#### Augmented Dickey-Fuller
+```{r, message = FALSE}
+library(urca)
+# ADF test for TFP in USA
+adf_tfp_usa <- ur.df(tfp_usa_ts, type = "trend", lags = 6, selectlags = "AIC"); 
+summary(adf_tfp_usa)
+```
+
+The ADF confirms the evidence that the TFP series for the USA has a unit root, therefore needs differentiation. The null hypothesis of non stationary is not rejected at the conventional levels of statistical significance (|-1.5153| < |-4.04|, at the 1% level).
+
+```{r, message = FALSE}
+# ADF test for TFP in Canada
+adf_tfp_can <- ur.df(tfp_can_ts, type = "trend", lags = 6, selectlags = "AIC"); 
+summary(adf_tfp_can)
+# ADF test for TFP in Mexico
+adf_tfp_mex <- ur.df(tfp_mex_ts, type = "trend", lags = 6, selectlags = "AIC"); 
+summary(adf_tfp_mex)
+```
+
+The same results are found in the ADF tests for the TFP series in Canada and Mexico, which reinforces the evidence of non stationarity of the series.
+
+Let's check if the first differencing of the series is enough for making them stationary.
+
+```{r, message = FALSE}
+# ACF diff() USA
+ggAcf(diff(tfp_usa_ts))
+# ACF diff()  Canada
+ggAcf(diff(tfp_can_ts))
+# ACF diff() Mexico
+ggAcf(diff(tfp_mex_ts))
+```
+
+Apparently the first difference of the series makes them stationary. Let's confirm this hypothesis using the ADF test.
+
+```{r, message = FALSE}
+# ADF test for diff() TFP USA
+adf_tfp_diff_usa <- ur.df(diff(tfp_usa_ts), type = "trend", lags = 6, selectlags = "AIC")
+summary(adf_tfp_diff_usa)
+# ADF test for diff() TFP in Canada
+adf_tfp_diff_can <- ur.df(diff(tfp_can_ts), type = "trend", lags = 6, selectlags = "AIC")
+summary(adf_tfp_diff_can)
+# ADF test for TFP in Mexico
+adf_tfp_diff_mex <- ur.df(diff(tfp_mex_ts), type = "trend", lags = 6, selectlags = "AIC") 
+summary(adf_tfp_diff_mex)
+```
+
+The ADF test reinforces the evidence that the first differences of the series are stationary.
+
+However the ACF plots does not give any evidence of which should be the optimal lag for the models.
+
+### Modelling
+
+
+Considering the autocorrelation between observations in the TFP series the problem is modelled using a linear approach through an ARIMA(p,d,q) model as show in the equation above:
+
+$$
+    TFP_t = \alpha_0 + A(L) TFP_{t-1} +  B(L)\epsilon_t
+$$
+We assume that the white noise process $\epsilon_t$ is stationary and mutually independent. $\textit{A(L)}$ and $\textit{B(L)}$ are polynomials in the lag operator assigning weights to past values of $TFP_t$ and $\epsilon_t$.
+
+Given that we do not know the best optimal lag operator for the series we will use the auto.arima() function of the forecast package to determine the best A(L) and B(L).
+
+The decision to not divide the sample into training and testing sets were made due to the small sample size. That being said an ad hoc ARIMA model was the modelling choice. Hossain et al. (2013) shows that the accuracy of the ARIMA model was better when compared to non linear approaches, such as the artificial neural networks.
+
+```{r, message = FALSE}
+library(forecast)
+# ARIMA TFP USA
+fit_tfp_usa <- auto.arima(tfp_usa_ts, max.p=5, max.q=5, max.P=5, max.Q = 5, test=c("kpss", "adf", "pp"),
+                        trace = TRUE, stepwise = FALSE, approx = FALSE, lambda = NULL, allowdrift = FALSE)
+summary(fit_tfp_usa)
+# ARIMA TFP Canada
+fit_tfp_can <- auto.arima(tfp_can_ts, max.p=5, max.q=5, max.P=5, max.Q = 5, test=c("kpss", "adf", "pp"),
+                        trace = TRUE, stepwise = FALSE, approx = FALSE, lambda = NULL, allowdrift = FALSE)
+summary(fit_tfp_can)
+# ARIMA TFP Mexico
+fit_tfp_mex <- auto.arima(tfp_mex_ts, max.p=5, max.q=5, max.P=5, max.Q = 5, test=c("kpss", "adf", "pp"),
+                        trace = TRUE, stepwise = FALSE, approx = FALSE, lambda = NULL, allowdrift = FALSE)
+summary(fit_tfp_mex)
+```
+
+### Residuals checking
+There are two basic assumptions about the residual of the models that are essential:
+
+(i) The residuals should be uncorrelated;
+(ii) The residuals should have mean zero.
+
+Also, there are two useful properties for computing predicted intervals:
+
+(i) Residuals should be have constant variance (homogeneity);
+(ii) Residuals should be normally distributed.
+
+
+```{r, message = FALSE}
+forecast::checkresiduals(fit_tfp_usa)
+forecast::checkresiduals(fit_tfp_can)
+forecast::checkresiduals(fit_tfp_mex)
+```
+
+Apparently, all the three models satisfies the assumptions about the residuals.
+
+### Forecasting
+
+Now let's use the models to forecast ten years of data.
+
+##### United States
+```{r, message = FALSE}
+tfp_usa_forecast <- forecast(fit_tfp_usa, h = 10, PI = FALSE)
+autoplot(tfp_usa_forecast)
+```
+
+##### Canada
+```{r, message = FALSE}
+tfp_can_forecast <- forecast(fit_tfp_can, h = 10, PI = FALSE)
+autoplot(tfp_can_forecast)
+```
+
+##### Mexico
+```{r, message = FALSE}
+tfp_mex_forecast <- forecast(fit_tfp_mex, h = 10, PI = FALSE)
+autoplot(tfp_mex_forecast)
+```
+
+#### Can you think about another feature that could be helpful in explaining TFP series?
+
+The Total Factor Productivity (TFP) is measured based on the relation between output growth, labour and capital. In the Penn World Table (Version 8.x) dataset there is a lot of variables related to the three inputs of TFP calculus. However, there is no information about exogenous variables that can have an impact on TFP. For example, changes in regulation can have a significant and direct effect on TFP. Suppose a country adopted a more strict Federal regulation in the labour market, that can lead to a direct effect on TFP.
+
+
+# Case 2
+
+In this study case the data consists basically of the official data source for Brazilian exports e imports, maintened by the government. Contains all trackings of monthly imports and exports of a range of products, by Brazilian states, and by routes. There is also data about imports and exports to other countries.
+
+The task of this test is to answer a few questions using this dataset.
+
+#### Loading the dataset
+
+```{r, message = FALSE}
+#### Working with the data# Loading data
+comexstat_data <- readr::read_csv("https://raw.githubusercontent.com/tauamagalhaes/4intelligence/main/data_comexstat.csv")
+# Loading libraries
+library(dplyr)
+# Filtering the TFP per country
+glimpse(comexstat_data)
+# Changing the formats of the columns
+comexstat_data$date <- as.Date(comexstat_data$date, "%Y-%m-%d")
+comexstat_data$tons <- as.numeric(comexstat_data$tons)
+```
+
+## First question
+
+The first question of the test asks to show the evolution of total monthly and total annual exports from Brazil (all states and to everywhere) of ‘soybeans’, ‘soybean oil’ and ‘soybean meal’;
+
+```{r, message = FALSE}
+## Creating three dataframes by product
+# Soybeans
+soybeans_df <- comexstat_data  %>% select(date, tons, type, product, state) %>% 
+  filter(type == "Export", product == "soybeans") %>% group_by(date) %>% 
+  summarise(tons = sum(tons)) %>% rename(tons_soybeans = tons)
+# Soybean oil
+soybean_oil_df <- comexstat_data  %>% select(date, tons, type, product, state) %>% 
+  filter(type == "Export", product == "soybean_oil") %>% group_by(date) %>% 
+  summarise(tons = sum(tons)) %>% rename(tons_soybean_oil = tons)
+# Soybean meal
+soybean_meal_df <- comexstat_data  %>% select(date, tons, type, product, state) %>% 
+  filter(type == "Export", product == "soybean_meal") %>% group_by(date) %>% 
+  summarise(tons = sum(tons)) %>% rename(tons_soybean_meal = tons)
+## Merging in a single data frame
+soybean_products_df <- left_join(soybeans_df, soybean_oil_df, by = "date")
+soybean_products_df <- left_join(soybean_products_df, soybean_meal_df, by = "date")
+# Changing to a ts object
+soybean_products_ts <- ts(soybean_products_df[, -1], start = c(1997,1), end = c(2019,12),frequency = 12)
+# Descriptive statistics of the data
+summary(soybean_products_df)
+```
+As we can see the from the descriptive statistics soybeans in general is the most exported between the three products. Which it was already expected, since it is the primary source of the three. 
+
+```{r, message = FALSE}
+##### Plots
+library(fpp2)
+library(ggplot2)
+# General plot of the series
+autoplot(soybean_products_ts, facets = TRUE, ylab = "Tons exported", main = "Monthly exports from Brazil of soybean products")
+```
+It can be seen in monthly plot of soybean products exports from Brazil that there is a clear sazonality in the raw soybean product. This must be due to sazonality of crops. We can see that for the more industrialized products, such as soybean oil and soybean meals this effect is smaller.
+
+Above we can see a plot of the yearly aggregated exports of soybean products from Brazil for the years of 1997 to 2019. 
+```{r, message = FALSE}
+### Aggregating the data by year
+library(lubridate)
+# Soybeans
+anual_soybean_df <- soybeans_df %>% select(date, tons_soybeans) %>%
+  mutate(date = ymd(date),
+         year = year(date)) %>%
+  group_by(year) %>% summarize(tons_soybeans = sum(tons_soybeans))
+# Soybean oil
+anual_soybean_oil_df <- soybean_oil_df %>% select(date, tons_soybean_oil) %>%
+  mutate(date = ymd(date),
+         year = year(date)) %>%
+  group_by(year) %>% summarize(tons_soybean_oil = sum(tons_soybean_oil))
+# Soybean meal
+anual_soybean_meal_df <- soybean_meal_df %>% select(date, tons_soybean_meal) %>%
+  mutate(date = ymd(date),
+         year = year(date)) %>%
+  group_by(year) %>% summarize(tons_soybean_meal = sum(tons_soybean_meal))
+## Merging in a single data frame
+anual_soybean_products_df <- left_join(anual_soybean_df, anual_soybean_oil_df, by = "year")
+anual_soybean_products_df <- left_join(anual_soybean_products_df, anual_soybean_meal_df, by = "year")
+# Changing to a ts object
+anual_soybean_products_ts <- ts(anual_soybean_products_df[, -1], start = c(1997,1), end = c(2019,12),frequency = 1)
+# Yearly plot of the series
+autoplot(anual_soybean_products_ts, facets = TRUE, ylab = "Tons exported", 
+         main = "Yearly exports from Brazil of soybean products")
+```
+
+## Second question
+
+The second question asks for the three most important products exported by Brazil in the last 5 years.
+
+```{r, message = FALSE}
+products_export_df <- comexstat_data  %>% select(date, tons, usd, type, product) %>% 
+  filter(type == "Export", date > as.Date("2015-01-01")) %>% group_by(product) %>% 
+  summarise(tons = sum(tons), usd = sum(usd))
+head(products_export_df)
+# Histogram volume exported
+barplot(products_export_df$tons,
+main = "Volume Exported from Brazil, 2015-2019",
+xlab = "Volume exported (tons)",
+ylab = "Product",
+names.arg = products_export_df$product,
+col = "darkred",
+horiz = FALSE)
+```
+
+```{r, message = FALSE}
+# Histogram value exported
+barplot(products_export_df$usd,
+main = "Vaule Exported from Brazil, 2015-2019",
+xlab = "Value exported (tons)",
+ylab = "Product",
+names.arg = products_export_df$product,
+col = "darkred",
+horiz = FALSE)
+```
+
+Aggregating the data by product export, we can visualize that soybeans, corn and sugar were the three most exported products by Brazil in the past five years in terms of volume exported (tons). However, if we look at total value exported (usd) in the same period, soybeans, sugar and soybean meals were the three most important products exported by Brazil.
+
+## Third question
+
+What are the main routes through which Brazil have been exporting ‘corn’ in the last few years? Are there differences in the relative importance of routes depending on the product?
+
+#### Corn
+
+Starting from the first part of the question, let's see what are the main routes that were used to export corn in the last five years of the dataset.
+
+```{r, message = FALSE}
+corn_5_export_df <- comexstat_data  %>% select(date, tons, usd, type, route, product) %>% 
+  filter(type == "Export", date > as.Date("2015-01-01"), product == "corn") %>% group_by(route) %>% 
+  summarise(tons = sum(tons), usd = sum(usd))
+head(corn_5_export_df)
+# Histogram volume exported
+barplot(corn_5_export_df$tons,
+main = "Volume Exported of corn from Brazil, 2015-2019",
+xlab = "Volume exported of corn (tons)",
+ylab = "Type of route",
+names.arg = corn_5_export_df$route,
+col = "darkred",
+horiz = FALSE)
+```
+
+Considering the last five years, the corn exporting have been through the sea, with river as the second more important type of route. However, we can see that there is a small fraction of this product exported by ground, air and other.
+
+Now let's see if the same is valid for the entire time span in the sample (1997 to 2019).
+
+```{r, message = FALSE}
+corn_export_df <- comexstat_data  %>% select(tons, usd, type, route, product) %>% 
+  filter(type == "Export", product == "corn") %>% group_by(route) %>% 
+  summarise(tons = sum(tons), usd = sum(usd))
+# Histogram volume exported
+barplot(corn_export_df$tons,
+main = "Volume Exported of corn from Brazil, 1997-2019",
+xlab = "Volume exported of corn (tons)",
+ylab = "Type of route",
+names.arg = corn_export_df$route,
+col = "darkred",
+horiz = FALSE)
+```
+
+The same is valid for the entire time span in the sample (1997-2019), the exporting of corn is mainly done by sea.
+
+To answer the second part of the question we need to do the same exercise for the other products. Let's start with soybeans.
+
+#### Soybeans
+
+```{r, message = FALSE}
+soybeans_export_df <- comexstat_data  %>% select(tons, usd, type, route, product) %>% 
+  filter(type == "Export", product == "soybeans") %>% group_by(route) %>% 
+  summarise(tons = sum(tons), usd = sum(usd))
+# Histogram volume exported
+barplot(soybeans_export_df$tons,
+main = "Volume Exported of soybeans from Brazil, 1997-2019",
+xlab = "Volume exported of soybeans (tons)",
+ylab = "Type of route",
+names.arg = soybeans_export_df$route,
+col = "darkred",
+horiz = FALSE)
+```
+
+#### Soybean oil
+
+```{r, message = FALSE}
+soybean_oil_export_df <- comexstat_data  %>% select(tons, usd, type, route, product) %>% 
+  filter(type == "Export", product == "soybean_oil") %>% group_by(route) %>% 
+  summarise(tons = sum(tons), usd = sum(usd))
+# Histogram volume exported
+barplot(soybean_oil_export_df$tons,
+main = "Volume Exported of soybean oil from Brazil, 1997-2019",
+xlab = "Volume exported of soybean oil (tons)",
+ylab = "Type of route",
+names.arg = soybean_oil_export_df$route,
+col = "darkred",
+horiz = FALSE)
+```
+
+#### Soybean meal
+
+```{r, message = FALSE}
+soybean_meal_export_df <- comexstat_data  %>% select(tons, usd, type, route, product) %>% 
+  filter(type == "Export", product == "soybean_meal") %>% group_by(route) %>% 
+  summarise(tons = sum(tons), usd = sum(usd))
+# Histogram volume exported
+barplot(soybean_meal_export_df$tons,
+main = "Volume Exported of soybean meal from Brazil, 1997-2019",
+xlab = "Volume exported of soybean meal (tons)",
+ylab = "Type of route",
+names.arg = soybean_meal_export_df$route,
+col = "darkred",
+horiz = FALSE)
+```
+
+#### Sugar
+
+```{r, message = FALSE}
+sugar_export_df <- comexstat_data  %>% select(tons, usd, type, route, product) %>% 
+  filter(type == "Export", product == "sugar") %>% group_by(route) %>% 
+  summarise(tons = sum(tons), usd = sum(usd))
+# Histogram volume exported
+barplot(sugar_export_df$tons,
+main = "Volume Exported of sugar from Brazil, 1997-2019",
+xlab = "Volume exported of sugar (tons)",
+ylab = "Type of route",
+names.arg = sugar_export_df$route,
+col = "darkred",
+horiz = FALSE)
+```
+
+#### Wheat
+
+```{r, message = FALSE}
+wheat_export_df <- comexstat_data  %>% select(tons, usd, type, route, product) %>% 
+  filter(type == "Export", product == "wheat") %>% group_by(route) %>% 
+  summarise(tons = sum(tons), usd = sum(usd))
+# Histogram volume exported
+barplot(wheat_export_df$tons,
+main = "Volume Exported of wheat from Brazil, 1997-2019",
+xlab = "Volume exported of wheat (tons)",
+ylab = "Type of route",
+names.arg = wheat_export_df$route,
+col = "darkred",
+horiz = FALSE)
+```
+
+The same is valid for the other products present in the Comexstat data. The main type of route for exorting corn, soybeans, soybean oil, soybean meal, corn, sugar and wheat is through sea. This was already expected since sea transport is the cheapest between the types of transportation for big volumes.
+
+## Fourth question
+
+Which countries have been the most important trade partners for Brazil in terms of ‘corn’ and ‘sugar’ in the last 3 years?
+
+#### Corn
+
+Let's start the question seeing which countries are the most important trade partners for corn.
+
+```{r, message = FALSE}
+corn_partners_export_df <- comexstat_data  %>% select(date, country, tons, usd, type,  product) %>% 
+  filter(type == "Export", product == "corn", date > as.Date("2017-01-01")) %>% group_by(country) %>% 
+  summarise(tons = sum(tons), usd = sum(usd))
+head(arrange(corn_partners_export_df, desc(corn_partners_export_df$tons)), n = 10)
+# Histogram volume exported
+barplot(corn_partners_export_df$tons,
+main = "Volume Exported of corn from Brazil, 2017-2019",
+xlab = "Country partner",
+ylab = "Volume exported of corn (tons)",
+names.arg = corn_partners_export_df$country,
+col = "darkred",
+horiz = FALSE)
+```
+
+In terms of volume and value of corn (tons) exported to each country in the last three years, Iran, Vietnam and Japan were the three most important trade partners of Brazil. Let's see now which countries Brazil have been importing corn from in the past three years.
+
+```{r, message = FALSE}
+corn_partners_import_df <- comexstat_data  %>% select(date, country, tons, usd, type,  product) %>% 
+  filter(type == "Import", product == "corn", date > as.Date("2017-01-01")) %>% group_by(country) %>% 
+  summarise(tons = sum(tons), usd = sum(usd))
+head(arrange(corn_partners_import_df, desc(corn_partners_import_df$tons)), n = 10)
+# Histogram volume exported
+barplot(corn_partners_import_df$tons,
+main = "Volume Imported of corn from Brazil, 2017-2019",
+xlab = "Country partner",
+ylab = "Volume imported of corn (tons)",
+names.arg = corn_partners_import_df$country,
+col = "darkred",
+horiz = FALSE)
+```
+
+In the past three years, Brazil imported corn from 9 countries. Paraguay, Argentina and United States are the three countries that exported more corn to Brazil in this period.
+
+#### Sugar
+
+To the second part if the question let's see which countries are the most important trade partners for sugar.
+
+```{r, message = FALSE}
+sugar_partners_export_df <- comexstat_data  %>% select(date, country, tons, usd, type,  product) %>% 
+  filter(type == "Export", product == "sugar", date > as.Date("2017-01-01")) %>% group_by(country) %>% 
+  summarise(tons = sum(tons), usd = sum(usd))
+head(arrange(sugar_partners_export_df, desc(sugar_partners_export_df$tons)), n = 10)
+# Histogram volume exported
+barplot(sugar_partners_export_df$tons,
+main = "Volume Exported of sugar from Brazil, 2017-2019",
+xlab = "Country partner",
+ylab = "Volume exported of sugar (tons)",
+names.arg = sugar_partners_export_df$country,
+col = "darkred",
+horiz = FALSE)
+```
+
+In terms of volume and value of sugar (tons) exported to each country in the last three years, Algeria, Bangladesh and India were the three most important trade partners of Brazil. Analyzing the importing side now.
+
+```{r, message = FALSE}
+sugar_partners_import_df <- comexstat_data  %>% select(date, country, tons, usd, type,  product) %>% 
+  filter(type == "Import", product == "sugar", date > as.Date("2017-01-01")) %>% group_by(country) %>% 
+  summarise(tons = sum(tons), usd = sum(usd))
+head(arrange(sugar_partners_import_df, desc(sugar_partners_import_df$tons)), n = 10)
+# Histogram volume exported
+barplot(sugar_partners_import_df$tons,
+main = "Volume Imported of sugar from Brazil, 2017-2019",
+xlab = "Country partner",
+ylab = "Volume imported of sugar (tons)",
+names.arg = sugar_partners_import_df$country,
+col = "darkred",
+horiz = FALSE)
+```
+
+United States, Argentina and Chile were the three countries that exported more sugar to Brazil between 2017 to 2019.
+
+## Fifth question
+
+For each of the products in the dataset, show the 5 most important states in terms of exports?
+
+```{r, message = FALSE}
+states_export_df <- comexstat_data  %>% select(state, tons, usd, type) %>% 
+  filter(type == "Export") %>% group_by(state) %>% 
+  summarise(tons = sum(tons), usd = sum(usd))
+head(arrange(states_export_df, desc(states_export_df$tons)), n = 26)
+# Histogram volume exported
+barplot(states_export_df$tons,
+main = "Volume Exported from each state of Brazil, 1997-2019",
+xlab = "State",
+ylab = "Volume exported (tons)",
+names.arg = states_export_df$state,
+col = "darkred",
+horiz = FALSE)
+```
+
+Considering the volume exported (tons), the 5 states that had the bigger volume exported between 1997 and 2019 were Mato Grosso, Paraná, São Paulo, Rio Grande do Sul and Goiás.
+
+## Sixth question - modelling skills
+
+What should be the total brazilian soybeans, soybean_meal, and corn export forecasts, in tons, for the next 11 years (2020-2030)?
+
+```{r, message = FALSE}
+#### Corn
+# Monthly data
+corn_df <- comexstat_data  %>% select(date, tons, type, product, state) %>% 
+  filter(type == "Export", product == "corn") %>% group_by(date) %>% 
+  summarise(tons = sum(tons)) %>% rename(tons_corn = tons)
+# Yearly data
+anual_corn_df <- corn_df %>% select(date, tons_corn) %>%
+  mutate(date = ymd(date),
+         year = year(date)) %>%
+  group_by(year) %>% summarize(tons_corn = sum(tons_corn))
+#### Loading the covariates dataset provided
+covariates_data <- readr::read_csv("https://raw.githubusercontent.com/tauamagalhaes/4intelligence/main/covariates.csv")
+# Filter for the period after 1997
+covariates_data <- covariates_data %>% filter(year >= 1997)
+#### Merging in a single data frame
+# Soybean
+soybean_anual_export_df <- left_join(anual_soybean_df, covariates_data, by = "year")
+soybean_anual_export_df <- soybean_anual_export_df %>% select(-c(price_soybean_meal, price_corn))
+# Soybean meal
+soybean_meal_anual_export_df <- left_join(anual_soybean_meal_df, covariates_data, by = "year")
+soybean_meal_anual_export_df <- soybean_meal_anual_export_df %>% select(-c(price_soybeans, price_corn))
+# Corn
+corn_anual_export_df <- left_join(anual_corn_df, covariates_data, by = "year")
+corn_anual_export_df <- corn_anual_export_df %>% select(-c(price_soybean_meal, price_soybeans))
+```
+
+Let's consider two different approaches of modelling. The first using an univariate time series based on an ARIMA(p,d,q) of the series. And the second disregarding the temporal autocorrelation, and assuming independence between observations we will adopt a random forest to model the exporting of soybeans, soybeans meal and corn.
+
+#### Soybeans
+
+```{r, message = FALSE}
+#### ARIMA
+# Chancging to a ts object
+soybean_anual_export_ts <- ts(anual_soybean_df[, -1], start = c(1997,1),frequency = 1)
+# Dividing between training and testing sets
+soybean_train <- soybean_anual_export_ts[1:20,]
+soybean_test <- soybean_anual_export_ts[21:23,]
+# Using auto.arima() function
+arima_fit_soybeans <- forecast::auto.arima(soybean_train, max.p=5, max.q=5, max.P=5, max.Q = 5, test=c("kpss", "adf", "pp"),
+                        trace = TRUE, stepwise = FALSE, approx = FALSE, lambda = NULL, allowdrift = FALSE)
+# Forecast and accuracy
+forecast_arima_soybeans <- forecast(arima_fit_soybeans, h = 3)
+forecast::accuracy(forecast_arima_soybeans, soybean_test)
+#### Random forest
+library(randomForest)
+# Set seed for reproducibility
+set.seed(123)
+# Dividing in training and testing set
+soybean_train_df <- soybean_anual_export_df[1:20, 2:12]
+soybean_test_df <- soybean_anual_export_df[21:23, 2:12]
+rf_fit_soybeans <- randomForest(tons_soybeans ~., data = soybean_train_df, mtry = 4,
+                          importance = TRUE, na.action = na.omit)
+rf_forecast <- predict(rf_fit_soybeans, newdata = soybean_test_df)
+# Accuracy
+library(Metrics)
+mape(soybean_test_df$tons_soybeans, rf_forecast)
+rmse(soybean_test_df$tons_soybeans, rf_forecast)
+```
+The ARIMA model showed a better accuracy between the two, so to forecast the new ten years of data the fitted ARIMA was used.
+
+```{r, message = FALSE}
+soybean_forecast <- forecast(arima_fit_soybeans, h = 10)
+autoplot(soybean_forecast)
+```
+
+#### Corn
+
+```{r, message = FALSE}
+#### ARIMA
+# Chancging to a ts object
+corn_anual_export_ts <- ts(anual_corn_df[, -1], start = c(1997,1),frequency = 1)
+# Dividing between training and testing sets
+corn_train <- corn_anual_export_ts[1:20,]
+corn_test <- corn_anual_export_ts[21:23,]
+# Using auto.arima() function
+arima_fit_corn <- forecast::auto.arima(corn_train, max.p=5, max.q=5, max.P=5, 
+                                               max.Q = 5, test=c("kpss", "adf", "pp"),
+                        trace = TRUE, stepwise = FALSE, approx = FALSE, lambda = NULL, allowdrift = FALSE)
+# Forecast and accuracy
+forecast_arima_corn <- forecast(arima_fit_corn, h = 3)
+forecast::accuracy(forecast_arima_corn, corn_test)
+#### Random Forest
+# Dividing in training and testing set
+corn_train_df <- corn_anual_export_df[1:20, 2:12]
+corn_test_df <- corn_anual_export_df[21:23, 2:12]
+rf_fit_corn <- randomForest(tons_corn ~., data = corn_train_df, mtry = 4,
+                          importance = TRUE, na.action = na.omit)
+rf_forecast_corn <- predict(rf_fit_corn, newdata = corn_test_df)
+# Accuracy
+mape(corn_test_df$tons_corn, rf_forecast_corn)
+rmse(corn_test_df$tons_corn, rf_forecast_corn)
+```
+For the exports of corn the ARIMA model also showed a better accuracy between the two, so to forecast the new ten years of data the fitted ARIMA was used.
+
+```{r, message = FALSE}
+corn_forecast <- forecast(arima_fit_corn, h = 10)
+autoplot(corn_forecast)
+```
+
+As we can see the temporal autocorrelation is strong enough that we need to consider in the models. I would like to emphasize that this is a preliminary exercise and further investigations are necessary to get better accuracy prediction about the volume exported of soybeans, soybean meal and corn. 
+
